@@ -27,6 +27,24 @@ updating**.
 
 ## Log
 
+### 2026-06-18 — Refactor src into a clean package (no behaviour change)
+- Split the single `src/ffll_igls.py` into a `src/ffll_igls/` package, one module per
+  logical part: `models`, `allocation` (Phase 1), `sequencing` (Phase 2), `simulation`
+  (cycle time + makespan), `ffll`, `igls`, `instances`, `experiments` (computation),
+  `reporting` (I/O), `__main__`. Public API re-exported from `__init__.py`.
+- Applied clean-code rules: parameter objects (`InstanceConfig`, `IGLSConfig`), named
+  constants (`EPSILON`, default IG-LS params), guard clauses, `Schedule` NamedTuple and
+  `InstanceResult` dataclass instead of bare tuples/dicts, injected RNG into `perturb`.
+- **Removed dead code:** the old `phase3_simulate_cycle_time` built a full schedule
+  simulation but then returned `W.max()` regardless — replaced by
+  `bottleneck_cycle_time(alloc) = W.max()`. Return value unchanged.
+- **Behaviour verified identical:** experiment output is byte-for-byte equal to the old
+  version (timing columns aside); all 3 tests pass; `ruff` clean. Report numbers unchanged.
+- **Run command changed:** `python src/ffll_igls.py` → `PYTHONPATH=src python -m ffll_igls`.
+- Note: the report PDF still refers to the implementation as the single file
+  `ffll_igls.py`; the package is conceptually the same `ffll_igls`. Fix the wording in the
+  report if exact agreement is wanted.
+
 ### 2026-06-18 — Repo cleanup + workflow setup
 - Restructured into `src/`, `tests/`, `docs/`. Moved `ffll_igls.py` → `src/`, the report
   PDF → `docs/`.

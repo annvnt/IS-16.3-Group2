@@ -51,10 +51,10 @@ def test_ten_instance_summary_matches_report():
     assert len(results) == 10
 
     # Every instance improved (report: "improved every single one of the 10").
-    assert all(r["improv"] > 1e-9 for r in results)
+    assert all(r.improvement > 1e-9 for r in results)
 
-    ffll_avg_gap = float(np.mean([r["ffll_gap"] for r in results]))
-    igls_avg_gap = float(np.mean([r["igls_gap"] for r in results]))
+    ffll_avg_gap = float(np.mean([r.ffll_gap for r in results]))
+    igls_avg_gap = float(np.mean([r.igls_gap for r in results]))
 
     # IG-LS is strictly better on average, and the aggregates match the report.
     assert igls_avg_gap < ffll_avg_gap

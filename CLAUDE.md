@@ -14,8 +14,18 @@ the *how* for this project.
   document it in a report. Problem: `FFs | bypass, b_i < ∞ | C_max`.
 - **Two deliverables that must agree:**
   1. `docs/Chapter16_3_Project_Solution.pdf` — the report (graded).
-  2. `src/ffll_igls.py` — the implementation the report describes.
-- **Entry point:** `python src/ffll_igls.py` reproduces the experiment table.
+  2. `src/ffll_igls/` — the implementation package the report describes.
+- **Entry point:** `PYTHONPATH=src python -m ffll_igls` reproduces the experiment table.
+
+## Source layout
+
+`src/ffll_igls/` is split one module per logical part — find code by responsibility:
+`models` (data structures) · `allocation` (Phase 1) · `sequencing` (Phase 2) ·
+`simulation` (cycle time + makespan) · `ffll` · `igls` · `instances` (generator + lower
+bound) · `experiments` (harness, computation) · `reporting` (console output) ·
+`__main__` (entry point). Public API is re-exported from `__init__.py`, so
+`from ffll_igls import Instance, ffll, igls, run_experiments` works regardless of layout.
+Keep computation and I/O in separate modules (experiments vs. reporting).
 
 ## The one rule that matters: code and report must agree
 
@@ -36,8 +46,8 @@ For any change, follow this loop. Don't skip Verify or Record.
 1. **Understand** — read `PROGRESS.md` (the running log) and the relevant part of the
    report/code before touching anything.
 2. **Change** — make the smallest change that does the job. Match the existing style.
-3. **Verify** — run `pytest` and `python src/ffll_igls.py`. Both must be green and the
-   output sane. Computational checks first; reasoning/eyeballing second.
+3. **Verify** — run `pytest` and `PYTHONPATH=src python -m ffll_igls`. Both must be green
+   and the output sane. Computational checks first; reasoning/eyeballing second.
 4. **Record** — append a dated entry to `PROGRESS.md`: what changed, why, and whether the
    report needs updating. This is what lets the next session (or teammate) continue
    without you.
@@ -47,7 +57,8 @@ earn that overhead.
 
 ## Code style
 
-Match what's already in `src/ffll_igls.py` — it's clean, readable, and well-commented.
+Match what's already in `src/ffll_igls/` — small single-purpose functions, type hints,
+Google-style docstrings, named constants (no magic numbers), guard clauses first.
 
 - Keep functions small and single-purpose; type hints on signatures; a short docstring
   on each public function.
