@@ -27,6 +27,12 @@ updating**.
 
 ## Log
 
+### 2026-06-18 — Fix report wording to match the package layout
+- Edited the report PDF's closing caption (page 10) from "a separate file: ffll_igls.py"
+  to "a separate package: src/ffll_igls/", matching the refactored layout. Done in place
+  with PyMuPDF (redact + re-insert, same Helvetica-Oblique 9pt gray, centered) since there
+  is no editable report source — only the PDF. Code and report now agree on the wording too.
+
 ### 2026-06-18 — Refactor src into a clean package (no behaviour change)
 - Split the single `src/ffll_igls.py` into a `src/ffll_igls/` package, one module per
   logical part: `models`, `allocation` (Phase 1), `sequencing` (Phase 2), `simulation`
@@ -41,9 +47,7 @@ updating**.
 - **Behaviour verified identical:** experiment output is byte-for-byte equal to the old
   version (timing columns aside); all 3 tests pass; `ruff` clean. Report numbers unchanged.
 - **Run command changed:** `python src/ffll_igls.py` → `PYTHONPATH=src python -m ffll_igls`.
-- Note: the report PDF still refers to the implementation as the single file
-  `ffll_igls.py`; the package is conceptually the same `ffll_igls`. Fix the wording in the
-  report if exact agreement is wanted.
+- Report wording about the implementation file fixed in a follow-up (see entry above).
 
 ### 2026-06-18 — Repo cleanup + workflow setup
 - Restructured into `src/`, `tests/`, `docs/`. Moved `ffll_igls.py` → `src/`, the report
