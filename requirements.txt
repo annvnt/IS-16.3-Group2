@@ -1,0 +1,5 @@
+# Runtime
+numpy>=1.24
+
+# Dev / tests (optional — only needed to run `pytest`)
+pytest>=8.0
