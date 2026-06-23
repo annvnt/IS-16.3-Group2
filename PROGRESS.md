@@ -27,6 +27,40 @@ updating**.
 
 ## Log
 
+### 2026-06-18 — Add animated FFLL-vs-IG-LS race
+- New `animation.py` + `flowline.py` render an animated **race**: two flow lines run the
+  same jobs in real time (queue -> machine with progress bar -> buffer/WIP -> done) with a
+  live data panel (clock, WIP, busy machines, done, progress bars). The IG-LS line clears
+  the board while FFLL is still running — the clearest demonstration of the improvement.
+  Run: `PYTHONPATH=src python -m ffll_igls.animation [--instance N] [--out STEM]`.
+  Outputs `figures/race.mp4` + `figures/race.gif`.
+- Default is **Instance 6** (FFLL 49 -> IG-LS 35, 29% sooner; only 4 machines / 3 stages —
+  the most dramatic *and* most readable race).
+- `flowline.py` is pure logic (layout + "where is each job at time t"), `animation.py` is
+  the matplotlib drawing — same compute/drawing split as timeline vs. viz.
+- Deps: GIF needs `matplotlib`+`pillow`; MP4 also needs system `ffmpeg`. New tests:
+  `test_flowline.py` (bucket accounting, layout, start/end states) and `test_animation.py`
+  (render smoke test, skipped without ffmpeg). Suite now 11 tests.
+
+### 2026-06-18 — Add Gantt + convergence visualization
+- New `viz.py` renders a 3-panel figure for one instance: FFLL schedule Gantt, IG-LS
+  schedule Gantt (so the makespan shrink is visible), and the IG-LS convergence curve.
+  Run: `PYTHONPATH=src python -m ffll_igls.viz [--instance N] [--out PATH]`.
+  Default is **Instance 7** (its iterated phase visibly improves 56 -> 50, so the
+  convergence curve is a real staircase; it also matches the report's worked trace).
+- Supporting refactors (behaviour-preserving, verified byte-identical + tests green):
+  - New `timeline.py` (`build_timeline`, `Operation`) extracts per-operation start/finish
+    times. `simulate_makespan` now derives the makespan from it — single source of truth,
+    removes the duplicated stage simulation.
+  - `igls` now drives the search via a public `igls_states` generator; `igls` takes the
+    last state, the convergence plot consumes the whole makespan history. No duplicated
+    loop.
+- New deps: `matplotlib` (viz only — core package imports without it). New tests:
+  `test_timeline.py` (makespan consistency, no machine overlap, bypass handling) and
+  `test_viz.py` (PNG smoke test, skipped if matplotlib missing). Suite now 7 tests.
+- Figure committed at `figures/algorithm_overview.png` (regenerate any time with the
+  command above; `--instance 9` is a good alternative — biggest absolute drop 97 -> 72).
+
 ### 2026-06-18 — Fix report wording to match the package layout
 - Edited the report PDF's closing caption (page 10) from "a separate file: ffll_igls.py"
   to "a separate package: src/ffll_igls/", matching the refactored layout. Done in place

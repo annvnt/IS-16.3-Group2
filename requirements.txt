@@ -1,5 +1,8 @@
 # Runtime
 numpy>=1.24
 
+# Visualization (only needed for `python -m ffll_igls.viz`; core runs without it)
+matplotlib>=3.7
+
 # Dev / tests (optional — only needed to run `pytest`)
 pytest>=8.0

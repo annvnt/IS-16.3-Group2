@@ -21,11 +21,16 @@ the *how* for this project.
 
 `src/ffll_igls/` is split one module per logical part — find code by responsibility:
 `models` (data structures) · `allocation` (Phase 1) · `sequencing` (Phase 2) ·
-`simulation` (cycle time + makespan) · `ffll` · `igls` · `instances` (generator + lower
-bound) · `experiments` (harness, computation) · `reporting` (console output) ·
-`__main__` (entry point). Public API is re-exported from `__init__.py`, so
-`from ffll_igls import Instance, ffll, igls, run_experiments` works regardless of layout.
-Keep computation and I/O in separate modules (experiments vs. reporting).
+`timeline` (per-operation start/finish times) · `simulation` (cycle time + makespan,
+derived from `timeline`) · `ffll` · `igls` · `instances` (generator + lower bound) ·
+`experiments` (harness, computation) · `reporting` (console output) · `viz` (static Gantt
++ convergence figure) · `flowline` (flow-line geometry + per-job location, pure) ·
+`animation` (animated FFLL-vs-IG-LS race, MP4/GIF) · `__main__` (entry point). Public API
+is re-exported from `__init__.py`, so `from ffll_igls import Instance, ffll, igls,
+run_experiments` works regardless of layout. `viz` and `animation` are **not**
+re-exported — they're the only modules needing matplotlib, so the core package imports
+without it. Keep computation and I/O / drawing in separate modules (experiments vs.
+reporting; timeline/flowline pure-logic vs. viz/animation drawing).
 
 ## The one rule that matters: code and report must agree
 
