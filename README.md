@@ -23,12 +23,17 @@ src/ffll_igls/       implementation package (one module per logical part)
   simulation.py        cycle time + makespan evaluation (Phase 3 / objective)
   ffll.py              the FFLL heuristic
   igls.py              IG-LS (local search, perturbation)
+  timeline.py          per-operation start/finish times (basis for Gantt + animation)
   instances.py         random instance generator + lower bound
   experiments.py       the 10-instance experiment harness (computation)
   reporting.py         console output (I/O, kept separate from computation)
+  viz.py               static Gantt + convergence figure (matplotlib)
+  flowline.py          flow-line geometry + "where is each job at time t" (pure)
+  animation.py         animated FFLL-vs-IG-LS race (MP4 + GIF)
   __main__.py          entry point
 tests/               regression tests that lock the report's claims
 docs/                the report PDF
+figures/             generated figures (Gantt + convergence overview)
 PROGRESS.md          running log of decisions and changes (read this first)
 CLAUDE.md            how Claude / contributors work in this repo
 ```
@@ -50,6 +55,34 @@ PYTHONPATH=src python -m ffll_igls    # from the repo root
 This prints the FFLL-vs-IG-LS comparison over 10 fixed-seed random instances plus two
 detailed traces. The numbers match Section 4.3 of the report (avg gap to lower bound:
 FFLL 33.8% → IG-LS 15.1%, all 10 instances improved).
+
+## Visualization
+
+```bash
+PYTHONPATH=src python -m ffll_igls.viz                       # default: Instance 7
+PYTHONPATH=src python -m ffll_igls.viz --instance 9 --out figures/inst9.png
+```
+
+Renders a three-panel figure (`figures/algorithm_overview.png`) for one instance:
+the **FFLL schedule** and the **IG-LS schedule** as stage-by-stage Gantt charts (jobs
+colour-coded so you can trace one through the line, bottleneck machine flagged, bypass
+visible as gaps), plus the **IG-LS convergence curve** (best makespan per iteration vs.
+the FFLL result and the lower bound). It's the quickest way to *see* how IG-LS shortens
+the schedule. Needs `matplotlib`; the core package runs without it.
+
+### Animated race (FFLL vs IG-LS)
+
+```bash
+PYTHONPATH=src python -m ffll_igls.animation                  # default: Instance 6
+PYTHONPATH=src python -m ffll_igls.animation --instance 9 --out figures/race9
+```
+
+Renders `figures/race.mp4` and `figures/race.gif`: two flow lines running the same jobs
+in real time. Jobs flow left→right through the stage columns (queue → machine, with a
+progress bar → buffer = WIP → done), and a live panel on the right tracks the clock, WIP,
+busy machines, and completion. You watch the **IG-LS line clear the board while FFLL is
+still working** — the clearest demonstration of the improvement. The GIF needs
+`matplotlib` + `pillow`; the MP4 additionally needs `ffmpeg` on the system.
 
 ## Tests
 
