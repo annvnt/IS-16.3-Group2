@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import Iterator
 
 from .allocation import allocate_machines
-from .models import Instance, Schedule
+from .models import Allocation, Instance, Schedule
 from .sequencing import dynamic_balancing
 from .simulation import bottleneck_cycle_time, simulate_makespan
 
@@ -46,21 +47,45 @@ def igls(inst: Instance, config: IGLSConfig | None = None) -> Schedule:
         The best schedule found (sequence, cycle time, makespan).
     """
     config = config or IGLSConfig()
-    rng = random.Random(config.seed)
     alloc = allocate_machines(inst)
 
-    sequence, best_makespan = local_search_2opt(dynamic_balancing(alloc), alloc)
-    for _ in range(config.iterations):
-        candidate = perturb(sequence, config.block_size, rng)
-        candidate, candidate_makespan = local_search_2opt(candidate, alloc)
-        if candidate_makespan < best_makespan - EPSILON:
-            sequence, best_makespan = candidate, candidate_makespan
+    sequence: list[int] = []
+    best_makespan = 0.0
+    for sequence, best_makespan in igls_states(alloc, config):
+        pass  # consume to the final state
 
     return Schedule(
         sequence=sequence,
         cycle_time=bottleneck_cycle_time(alloc),
         makespan=best_makespan,
     )
+
+
+def igls_states(
+    alloc: Allocation, config: IGLSConfig
+) -> Iterator[tuple[list[int], float]]:
+    """Yield the best ``(sequence, makespan)`` after warm start and each iteration.
+
+    The single source of truth for the IG-LS search loop: :func:`igls` consumes
+    the final state, while plots consume the whole makespan history.
+
+    Args:
+        alloc: The Phase 1 allocation (shared across iterations).
+        config: IG-LS tuning parameters.
+
+    Yields:
+        The incumbent ``(sequence, makespan)`` once per state, oldest first.
+    """
+    rng = random.Random(config.seed)
+    sequence, best_makespan = local_search_2opt(dynamic_balancing(alloc), alloc)
+    yield sequence, best_makespan
+    for _ in range(config.iterations):
+        candidate, candidate_makespan = local_search_2opt(
+            perturb(sequence, config.block_size, rng), alloc
+        )
+        if candidate_makespan < best_makespan - EPSILON:
+            sequence, best_makespan = candidate, candidate_makespan
+        yield sequence, best_makespan
 
 
 def local_search_2opt(sequence, alloc):

@@ -17,12 +17,13 @@ from __future__ import annotations
 from .allocation import allocate_machines
 from .experiments import InstanceResult, Scenario, run_experiments
 from .ffll import ffll
-from .igls import IGLSConfig, igls, local_search_2opt, perturb
+from .igls import IGLSConfig, igls, igls_states, local_search_2opt, perturb
 from .instances import InstanceConfig, generate_instance, lower_bound
 from .models import Allocation, Instance, Schedule
 from .reporting import print_experiment_report, trace_instance
 from .sequencing import dynamic_balancing, overload_score
 from .simulation import bottleneck_cycle_time, simulate_makespan
+from .timeline import Operation, build_timeline
 
 __all__ = [
     "Instance",
@@ -35,9 +36,12 @@ __all__ = [
     "simulate_makespan",
     "ffll",
     "igls",
+    "igls_states",
     "IGLSConfig",
     "local_search_2opt",
     "perturb",
+    "Operation",
+    "build_timeline",
     "generate_instance",
     "InstanceConfig",
     "lower_bound",
