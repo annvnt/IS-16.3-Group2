@@ -3,39 +3,25 @@
 Group 2 project for **Intelligent Scheduling** (TU Munich, SS2026). Operations Research
 project based on **Chapter 16.3** of Pinedo, *Scheduling: Theory, Algorithms, and Systems*.
 
-**Problem:** `FFs | bypass, b_i < ∞ | C_max` — a Flexible Flow Shop (stages in series,
-parallel machines per stage) with job bypass and finite buffers. The goal is a cyclic
-schedule for one Minimum Part Set (MPS) that minimizes cycle time (maximizes throughput).
+**Problem:** `FFc | Mj, bi < ∞ | Cmax` — a Flexible Flow Shop (stages in series, parallel
+machines per stage) with machine eligibility restrictions and finite buffers between
+stages. The goal is a cyclic schedule for one Minimum Part Set (MPS) that minimizes
+makespan (cycle time).
 
 **Deliverables:**
-- `docs/Chapter16_3_Project_Solution.pdf` — the written report (problem statement, MIP,
-  FFLL algorithm, IG-LS improvement, experiments).
-- `src/ffll_igls/` — the implementation: **FFLL** (3-phase heuristic) + **IG-LS**
-  (Iterated Greedy with Local Search) + the 10-instance experiment runner.
+- `docs/Chapter16-3_Group2_updated.pdf` — the written report (problem statement, Graham
+  classification, MIP formulation, FFLL algorithm, worked examples, and the FFLL-vs-MIP
+  instance comparison of Section 4).
+- `ffll_vs_mip.py` — the implementation backing report Section 4: the **FFLL** heuristic
+  (LPT allocation → Dynamic Balancing → bottleneck timing) and an **exact Gurobi MIP**
+  that mirrors the Section 2 formulation exactly (machine eligibility + full time-indexed
+  buffer constraints), run head-to-head on the same ten small instances.
 
 ## Layout
 
 ```
-src/ffll_igls/       implementation package (one module per logical part)
-  models.py            data structures (Instance, Allocation, Schedule)
-  allocation.py        Phase 1 — LPT machine allocation
-  sequencing.py        Phase 2 — Dynamic Balancing
-  simulation.py        cycle time + makespan evaluation (Phase 3 / objective)
-  ffll.py              the FFLL heuristic
-  igls.py              IG-LS (local search, perturbation)
-  timeline.py          per-operation start/finish times (basis for Gantt + animation)
-  instances.py         random instance generator + lower bound
-  experiments.py       the 10-instance experiment harness (computation)
-  reporting.py         console output (I/O, kept separate from computation)
-  viz.py               static Gantt + convergence figure (matplotlib)
-  flowline.py          flow-line geometry + "where is each job at time t" (pure)
-  animation.py         animated FFLL-vs-IG-LS race (MP4 + GIF)
-  __main__.py          entry point
-tests/               regression tests that lock the report's claims
-docs/                the report PDF
-figures/             generated figures (Gantt + convergence overview)
-PROGRESS.md          running log of decisions and changes (read this first)
-CLAUDE.md            how Claude / contributors work in this repo
+ffll_vs_mip.py       FFLL heuristic + Gurobi MIP + instance generator + comparison runner
+docs/                the report PDF, LaTeX source, and bibliography
 ```
 
 ## Setup
@@ -45,51 +31,25 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run the experiments (reproduces the report's table)
+Requires `gurobipy` and a Gurobi license (a free size-limited/academic license is enough
+for these instance sizes).
+
+## Run the comparison (reproduces the report's Table 6)
 
 ```bash
-PYTHONPATH=src python -m ffll_igls    # from the repo root
-# or:  cd src && python -m ffll_igls
+python ffll_vs_mip.py
 ```
 
-This prints the FFLL-vs-IG-LS comparison over 10 fixed-seed random instances plus two
-detailed traces. The numbers match Section 4.3 of the report (avg gap to lower bound:
-FFLL 33.8% → IG-LS 15.1%, all 10 instances improved).
+Solves the same ten small instances used in the report (3–5 jobs, 2–3 stages, 1–2
+machines per stage; S9/S10 include bypass) with both FFLL and the Gurobi MIP, prints a
+comparison table (FFLL makespan, MIP-optimal `T*`, gap, solve time, buffer-feasibility
+check), and saves a side-by-side Gantt chart per instance to `gantt_charts/` (FFLL on
+top, MIP-optimal on the bottom, consistent job colours in both). Matches Table 6 of the
+report: FFLL matches the optimum on 5/10 instances, with an average gap of 6.8%.
 
-## Visualization
+To reproduce the minimal counter-example (Example B) with its own Gantt chart:
 
-```bash
-PYTHONPATH=src python -m ffll_igls.viz                       # default: Instance 7
-PYTHONPATH=src python -m ffll_igls.viz --instance 9 --out figures/inst9.png
+```python
+from ffll_vs_mip import run_example_b
+run_example_b()
 ```
-
-Renders a three-panel figure (`figures/algorithm_overview.png`) for one instance:
-the **FFLL schedule** and the **IG-LS schedule** as stage-by-stage Gantt charts (jobs
-colour-coded so you can trace one through the line, bottleneck machine flagged, bypass
-visible as gaps), plus the **IG-LS convergence curve** (best makespan per iteration vs.
-the FFLL result and the lower bound). It's the quickest way to *see* how IG-LS shortens
-the schedule. Needs `matplotlib`; the core package runs without it.
-
-### Animated race (FFLL vs IG-LS)
-
-```bash
-PYTHONPATH=src python -m ffll_igls.animation                  # default: Instance 6
-PYTHONPATH=src python -m ffll_igls.animation --instance 9 --out figures/race9
-```
-
-Renders `figures/race.mp4` and `figures/race.gif`: two flow lines running the same jobs
-in real time. Jobs flow left→right through the stage columns (queue → machine, with a
-progress bar → buffer = WIP → done), and a live panel on the right tracks the clock, WIP,
-busy machines, and completion. You watch the **IG-LS line clear the board while FFLL is
-still working** — the clearest demonstration of the improvement. The GIF needs
-`matplotlib` + `pillow`; the MP4 additionally needs `ffmpeg` on the system.
-
-## Tests
-
-```bash
-pytest
-```
-
-The tests are the guardrail: they assert the worked examples from the report (Example A
-cycle time = 18, Example B = 20) and that the 10-instance summary still matches. If you
-change the algorithm, run these and update the report if the numbers move.

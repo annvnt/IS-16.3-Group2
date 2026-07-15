@@ -1,8 +1,9 @@
 # Runtime
 numpy>=1.24
 
-# Visualization (only needed for `python -m ffll_igls.viz`; core runs without it)
-matplotlib>=3.7
+# Exact MIP benchmark; requires a Gurobi license (a free size-limited/academic license
+# works for the small instances used here)
+gurobipy>=11.0
 
-# Dev / tests (optional — only needed to run `pytest`)
-pytest>=8.0
+# Gantt chart plotting (python ffll_vs_mip.py saves figures to gantt_charts/)
+matplotlib>=3.7
