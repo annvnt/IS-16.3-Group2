@@ -6,7 +6,3 @@ matplotlib>=3.7
 
 # Dev / tests (optional — only needed to run `pytest`)
 pytest>=8.0
-
-# Exact MIP benchmark (only needed for `python ffll_vs_mip.py`); requires a Gurobi
-# license (a free size-limited license works for the small instances used here)
-gurobipy>=11.0

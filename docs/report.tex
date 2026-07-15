@@ -1,0 +1,1091 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{url}
+\usepackage[numbers,sort&compress]{natbib}
+
+% ---------- Colors ----------
+\definecolor{navy}{HTML}{1A1A2E}
+\definecolor{steel}{HTML}{2D4A7A}
+\definecolor{lightgray}{HTML}{F4F4F4}
+
+% ---------- Header / Footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{steel}{Flexible Flow Line Scheduling}}
+\fancyhead[R]{\small\textcolor{steel}{Pinedo Ch.~16.3}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.5pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ---------- Section formatting ----------
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{navy}}
+  {\thesection}{0.6em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{steel}}
+  {\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}
+  {\normalfont\bfseries\color{steel}}
+  {\thesubsubsection}{0.6em}{}
+
+% ---------- Listings style ----------
+\lstdefinestyle{pseudo}{
+  backgroundcolor=\color{lightgray},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{steel},
+  framesep=6pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=steel,
+  citecolor=steel,
+  urlcolor=steel,
+}
+
+\newtheorem{definition}{Definition}
+
+\title{\vspace{-1.5cm}
+  {\color{steel}\Large Operations Research Project Report}\\[0.4cm]
+  {\color{navy}\Huge\bfseries Scheduling of a Flexible Flow Line\\ with Limited Buffers and Bypass}\\[0.3cm]
+  {\large Chapter 16.3 --- Pinedo, \textit{Scheduling: Theory, Algorithms, and Systems}}
+}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+\noindent
+This report analyzes the scheduling problem described in Section~16.3 of
+Pinedo's \textit{Scheduling: Theory, Algorithms, and Systems}
+\citep{pinedo2016scheduling}: the cyclic scheduling of a flexible flow
+line with limited buffers and job bypass, originally addressed at IBM via
+the Flexible Flow Line Loading (FFLL) algorithm \citep{ibm_ffll}. We
+(1)~formalize the problem and its Graham three-field classification,
+(2)~derive and critically assess a mixed-integer programming (MIP)
+formulation with a fully linear, time-indexed buffer constraint and an
+explicit machine-eligibility constraint, (3)~describe the three-phase
+FFLL heuristic, apply it to three original numerical examples -- including
+one demonstrating machine eligibility restrictions -- and compare it
+against both the unweighted and
+bottleneck-weighted variants of the Profile Fitting (PF) heuristic of
+\citet{mccormick1989sequencing}, adapted to the finite-buffer setting,
+and (4)~propose an Iterated Greedy with Local Search (IG-LS) algorithm
+inspired by the iterated greedy framework of \citet{ruiz2007simple},
+implement it, and benchmark it against FFLL on ten randomly generated
+instances. Weighting the bottleneck machine improves PF's average gap
+from 50.1\% to 43.1\%, mirroring Pinedo's own example; FFLL nonetheless
+outperforms both PF variants on average (33.8\% mean gap), while IG-LS
+further reduces FFLL's average optimality gap to 15.1\%, reaching the
+lower bound on two of the ten instances.
+\end{abstract}
+
+\vspace{0.5cm}
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Problem Statement and Graham Classification}
+% =====================================================================
+
+\subsection{Problem Description}
+
+The problem considers a \textbf{flexible flow line (FFL)} -- a production
+environment consisting of multiple stages arranged in series, where each
+stage contains one or more machines operating in parallel. The specific
+context in Section~16.3 of \citet{pinedo2016scheduling} is the assembly
+of printed circuit boards (PCBs), an environment for which the Flexible
+Flow Line Loading (FFLL) algorithm was originally designed at IBM
+\citep{ibm_ffll}.
+
+The environment has the following defining characteristics:
+
+\begin{description}[leftmargin=2.2cm,style=nextline]
+  \item[Jobs] Each job represents a batch of relatively small identical
+    items (e.g., PCBs). A set of jobs that together represent one full
+    day's production mix is called a \emph{Minimum Part Set} (MPS). The
+    manufacturing process is repetitive, so the MPS cycles through the
+    system continuously.
+  \item[Processing] Each job must be processed at every stage on exactly
+    one machine. Not all machines at a stage are necessarily identical --
+    some may handle only specific job types.
+  \item[Bypass] A job may not require processing at every stage. If a job
+    skips a stage, the material handling system transports it past that
+    stage. This is modeled by setting the processing time of that job at
+    the bypassed stage to zero, $p_{ij}=0$.
+  \item[Limited buffers] Between stages, buffer space is finite. If a
+    buffer is full, the material handling system halts -- or, if
+    recirculation is possible, the job bypasses the stage and recirculates.
+  \item[Cyclic schedule] Because production is repetitive, the objective
+    is a \emph{cyclic schedule}: the best ordering and timing of jobs
+    within one MPS cycle, repeated indefinitely.
+\end{description}
+
+\subsection{Objectives and Alternative Objective Functions}
+
+The FFLL algorithm pursues two objectives simultaneously
+\citep{pinedo2016scheduling}:
+
+\begin{itemize}
+  \item \textbf{Primary objective -- maximize throughput.} In cyclic
+    scheduling this is equivalent to minimizing the cycle time of one MPS.
+    The cycle time cannot be smaller than the workload of the bottleneck
+    machine, so the algorithm seeks to approach this lower bound.
+  \item \textbf{Secondary objective -- minimize work-in-process (WIP).}
+    Since buffer space is limited, reducing WIP lowers the probability of
+    buffer overflow and the resulting blocking.
+\end{itemize}
+
+Alternative objective functions that could be substituted for $C_{\max}$
+include:
+
+\begin{itemize}
+  \item Minimizing weighted tardiness $\sum w_j T_j$ -- relevant when jobs
+    carry due dates and differing priorities.
+  \item Minimizing total/average flow time $\sum C_j$ -- reducing the
+    average time a job spends in the system.
+  \item Minimizing the number of tardy jobs $\sum U_j$ -- relevant in
+    customer-facing settings.
+  \item Minimizing maximum lateness $L_{\max}$ -- relevant when due-date
+    violations carry hard consequences.
+\end{itemize}
+
+\subsection{Graham Notation}
+
+We use the standard three-field notation $\alpha \mid \beta \mid \gamma$,
+presented by \citet{pinedo2016scheduling} as an adapted version of the
+classical framework, together with Pinedo's own machine-environment
+symbol for this specific class of problems. Pinedo denotes the flexible
+flow shop by \textbf{FFc}, where $c$ is the number of stages in series,
+each stage being a bank of \emph{parallel machines}
+\citep{pinedo2016scheduling}. The classification is therefore:
+
+\begin{equation*}
+  \boxed{\;FFc \mid M_j,\; b_i < \infty \mid C_{\max}\;}
+\end{equation*}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Field} & \textbf{Symbol} & \textbf{Meaning} \\
+\midrule
+$\alpha$ (machine environment) & $FFc$ & Flexible flow shop: $c$ stages in
+  series, each stage a \\
+  & & bank of parallel machines \citep{pinedo2016scheduling} \\
+$\beta$ (constraints) & $M_j$ & Machine eligibility restrictions: job $j$
+  may only be processed \\
+  & & on a subset $M_j$ of the machines at its stage
+  \citep{pinedo2016scheduling} \\
+ & $b_i < \infty$ & Finite buffer capacity between stages
+  \citep{mccormick1989sequencing} \\
+$\gamma$ (objective) & $C_{\max}$ & Minimize makespan / cycle time of the
+  MPS \\
+\bottomrule
+\end{tabular}
+\caption{Graham three-field classification of the flexible flow line
+  scheduling problem.}
+\end{table}
+
+\textbf{On omitting an informal ``bypass'' field entry.} Bypass is not a
+standard Graham symbol in the first place, and the two genuine
+structural features an informal ``$bypass$'' term might seem to require
+are already covered by entries that \emph{are} standard. A job that
+bypasses a stage is, in our data, simply a job with $p_{ij}=0$ for every
+machine $i$ at that stage -- a property of the input data $p_{ij}$, not
+an additional constraint requiring its own $\beta$-symbol (Pinedo's own
+chapter never introduces one either). Once machine eligibility is made
+explicit via the standard symbol $M_j$ \citep{pinedo2016scheduling},
+where in the most general case $M_j$ may be an arbitrary subset of the
+stage's machines, the routing flexibility that an informal ``bypass''
+notation would gesture at is already subsumed: $M_j$ together with the
+convention $p_{ij}=0$ for bypassed stages fully describes which machines
+(if any) a job visits at a given stage, without requiring a separate
+notation symbol. The classification above is therefore both more compact
+and more faithful to standard usage.
+
+\textbf{On the buffer-capacity entry.} The entry $b_i<\infty$ is kept
+exactly as a finite-buffer-capacity statement, the most direct reading
+of the problem in Section~16.3. We attribute it to
+\citet{mccormick1989sequencing} rather than introducing a separate
+buffer-specific notation symbol, since that paper -- already cited in
+Section~3.3 for the Profile Fitting heuristic -- establishes the
+key structural fact connecting limited-buffer and zero-buffer (blocking)
+flow shops: \emph{any} flow shop with a limited buffer of capacity $b$
+between two stages can be represented exactly by inserting $b$
+zero-processing-time ``buffer machines'' between them, reducing the
+limited-buffer case to the zero-buffer (blocking) case studied
+extensively in the flow-shop literature. This is the same reduction
+that justifies our finite-buffer adaptation of Profile Fitting in
+Section~3.3, so citing it here keeps the notation, the buffer model, and
+the PF heuristic discussion all anchored to a single source rather than
+introducing a new one solely for this purpose.
+
+\textbf{Remark.} $FFc$ generalizes both the classical flow shop ($Fm$,
+single machine per stage) and the parallel-machine environment
+($Pm$, a single stage); it reduces to $Fm$ when every stage has exactly
+one machine. Machine eligibility restrictions ($M_j$) mean routing is no
+longer uniform across jobs -- a job may be restricted to a strict subset
+of the machines at a stage it visits -- and finite buffers ($b_i<\infty$)
+introduce \emph{blocking}, a phenomenon absent from most classical
+scheduling theory. Even the two-machine flow shop with blocking is known
+to be NP-hard \citep{hall1996machine}, and the combination of parallel
+machines, machine eligibility, and finite buffers studied here is at
+least as hard. This NP-hardness is the central motivation for the
+heuristic (rather than exact) solution approach of Section~3.
+
+% =====================================================================
+\section{MIP Formulation and Critical Assessment}
+% =====================================================================
+
+Pinedo's chapter does not present an explicit mixed-integer program; we
+construct one here that mirrors the three decisions made sequentially by
+the FFLL algorithm: machine assignment, job sequencing, and timing.
+
+\subsection{Indices, Parameters and Decision Variables}
+
+\paragraph{Indices and parameters.}
+\begin{itemize}
+  \item $n$: number of jobs in the MPS, indexed $j=1,\dots,n$.
+  \item $m$: total number of machines, indexed $i=1,\dots,m$.
+  \item $S$: number of stages, indexed $s=1,\dots,S$.
+  \item $M_s$: set of machines belonging to stage $s$.
+  \item $p_{ij}$: processing time of job $j$ on machine $i$ ($0$ if job $j$
+    bypasses the stage containing machine $i$).
+  \item $E_{ij} \in \{0,1\}$: \emph{eligibility} indicator, $E_{ij}=1$ if
+    machine $i$ is capable of processing job $j$ and $0$ otherwise. This
+    captures the fact, noted explicitly in the problem description, that
+    not all machines within a stage are identical and a given job may be
+    restricted to a specific subset of machines at that stage.
+  \item $b_s$: buffer capacity between stage $s$ and stage $s+1$.
+  \item $H$: a finite planning horizon long enough to contain any feasible
+    schedule of one MPS, e.g.\ $H = \sum_{j=1}^n \sum_{i=1}^m p_{ij}$ (the
+    sum of all processing times). Time is discretized into unit periods
+    $t \in \mathcal{T} = \{0,1,\dots,H\}$.
+  \item $L$: a sufficiently large constant (big-$M$), e.g.\ $L = H$.
+\end{itemize}
+
+\noindent We also use the following \emph{derived} sets and quantities,
+defined purely in terms of the parameters above (they are not
+independent inputs to the model):
+\begin{align*}
+  M_s(j) &\;:=\; \{\, i \in M_s : E_{ij} = 1 \,\}, &&\text{the machines at
+    stage $s$ eligible to process job } j, \\
+  W_i &\;:=\; \sum_{j=1}^{n} p_{ij}\, x_{ij}, &&\text{the total workload
+    assigned to machine } i \text{ under allocation } x.
+\end{align*}
+By convention, if job $j$ bypasses stage $s$ entirely then $E_{ij}=1$ for
+all $i \in M_s$ and $p_{ij}=0$ for all $i \in M_s$ -- bypass and
+eligibility are independent concepts and must not be conflated: bypass
+means the job skips the \emph{stage}, whereas $E_{ij}=0$ means the job
+must avoid a \emph{specific machine} while still being processed
+somewhere else at that same stage.
+
+\paragraph{Decision variables.}
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Variable & Domain & Meaning \\
+\midrule
+$x_{ij}$ & $\{0,1\}$ & $1$ if job $j$ is assigned to machine $i$ \\
+$y_{ijj'}$ & $\{0,1\}$ & $1$ if job $j$ precedes job $j'$ on machine $i$ \\
+$C_{ij}$ & $\mathbb{R}_{\ge 0}$ & Completion time of job $j$ on machine $i$ \\
+$z_{jst}$ & $\{0,1\}$ & $1$ if job $j$ is waiting in the buffer between
+  stage $s$ and $s{+}1$ at time $t \in \mathcal{T}$ \\
+$T$ & $\mathbb{R}_{\ge 0}$ & Cycle time (makespan of one MPS) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{MIP Model}
+
+\begin{align}
+  \text{minimize} \quad & T \label{eq:obj}\\[4pt]
+  \text{s.t.}\quad
+  &\sum_{i \in M_s(j)} x_{ij} = 1
+    && \forall j,\; \forall s \tag{C1a}\label{eq:c1a}\\
+  &x_{ij} \le E_{ij}
+    && \forall i,\; \forall j \tag{C1b}\label{eq:c1b}\\
+  &C_{ij} \ge C_{ij'} + p_{ij} x_{ij} - L(1 - y_{ijj'})
+    && \forall i,\; \forall j \neq j' \tag{C2a}\label{eq:c2a}\\
+  &C_{ij'} \ge C_{ij} + p_{ij'} x_{ij'} - L\, y_{ijj'}
+    && \forall i,\; \forall j \neq j' \tag{C2b}\label{eq:c2b}\\
+  &C_{ij} \ge C_{i'j} + p_{ij} x_{ij}
+    && \forall j,\, s,\, i \in M_s,\, i' \in M_{s-1} \tag{C3}\label{eq:c3}\\[4pt]
+  &z_{jst} \ge x_{i'j} - \frac{C_{i'j} - t}{L} - \frac{t - C_{ij} + 1}{L}
+    && \forall j,\, s,\, i' \in M_s,\, i \in M_{s+1},\, t \in \mathcal{T}
+    \tag{C4a}\label{eq:c4a}\\
+  &\sum_{j=1}^{n} z_{jst} \le b_s
+    && \forall s,\; \forall t \in \mathcal{T} \tag{C4b}\label{eq:c4b}\\[4pt]
+  &T \ge C_{ij}
+    && \forall i,j : x_{ij}=1 \tag{C5}\label{eq:c5}\\
+  &T \ge W_i = \sum_{j=1}^{n} p_{ij}\, x_{ij}
+    && \forall i \tag{C6}\label{eq:c6}\\
+  &x_{ij},\, y_{ijj'},\, z_{jst} \in \{0,1\},\quad C_{ij}, T \ge 0
+    \tag{C7}\label{eq:c7}
+\end{align}
+
+\noindent
+\textbf{(C1a)} assigns every job to exactly one \emph{eligible} machine
+per stage -- restricting the summation to $M_s(j)$ rather than the full
+stage $M_s$ already excludes ineligible machines from the feasible
+region, and bypassed stages satisfy it trivially since $p_{ij}=0$ for all
+$i \in M_s(j)$. \textbf{(C1b)} is an explicit, redundant-but-clarifying
+restatement of the same restriction directly on $x_{ij}$: it forbids
+assigning job $j$ to any machine $i$ with $E_{ij}=0$, regardless of
+processing time. We retain both forms because~\eqref{eq:c1a} is the
+form a solver actually branches on (a smaller, pre-filtered sum), while
+\eqref{eq:c1b} is the form that should be used if the model is
+generated programmatically with $x_{ij}$ ranging over \emph{all} $i \in
+M_s$ for convenience -- in that case \eqref{eq:c1a} would need to be
+replaced by $\sum_{i \in M_s} x_{ij} = 1$ and \eqref{eq:c1b} becomes the
+constraint doing the actual exclusion work. Without \emph{either} form,
+a solver could legally satisfy machine assignment by placing a
+zero-duration ``ghost'' visit on an ineligible machine, which is a
+materially different (and incorrect) relaxation of the problem from
+bypass, where a zero-duration visit is genuinely correct because the
+job truly skips that stage. \textbf{(C2a--C2b)} are the classical
+disjunctive constraints preventing two jobs from overlapping on the same
+machine. \textbf{(C3)} enforces the series structure of the flow line: a
+job cannot start processing at stage $s$ before completing stage $s-1$.
+
+\textbf{(C4a--C4b)} jointly enforce the buffer capacity and are now fully
+linear. The auxiliary binary $z_{jst}$ indicates whether job $j$ is
+physically occupying the buffer between stage $s$ and $s+1$ at discrete
+time $t$ -- that is, whether $j$ has completed processing at its
+stage-$s$ machine $i'$ (so $C_{i'j} \le t$) but has not yet started
+processing at its stage-$(s{+}1)$ machine $i$ (so $t < C_{ij}$, i.e.\
+$t \le C_{ij}-1$ for integer time). Constraint~\eqref{eq:c4a} is a
+standard big-$L$ linearization that forces $z_{jst}=1$ whenever both
+conditions hold for the assigned machines ($x_{i'j}=x_{ij}=1$), and
+allows $z_{jst}=0$ otherwise; it is linear in all decision variables once
+$t$ ranges over the finite, explicitly defined index set $\mathcal{T}$.
+Constraint~\eqref{eq:c4b} then simply caps, at every discrete time
+$t \in \mathcal{T}$, the number of jobs simultaneously occupying the
+buffer between stage $s$ and $s+1$ at $b_s$. \textbf{(C5)} defines the
+cycle time as the latest completion time across all jobs and machines.
+\textbf{(C6)} is a valid inequality stating that the cycle time cannot be
+smaller than the total workload $W_i$ of any single machine, where $W_i$
+is the derived quantity defined in Section~2.1 -- this tightens the LP
+relaxation considerably and is not an independent constant.
+
+\subsection{Model Size and Complexity}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+Component & Count \\
+\midrule
+Binary variables $x_{ij}$ & $m \times n$ \\
+Binary sequencing variables $y_{ijj'}$ & $m \times n \times (n-1)$ \\
+Binary buffer-occupancy variables $z_{jst}$ & $n \times S \times H$ \\
+Continuous variables $C_{ij}$ & $m \times n$ \\
+Eligibility constraints \eqref{eq:c1b} & $O(mn)$ \\
+Disjunctive constraints \eqref{eq:c2a}--\eqref{eq:c2b} & $O(m n^2)$ \\
+Buffer constraints \eqref{eq:c4a}--\eqref{eq:c4b} & $O(n \cdot S \cdot H)$ \\
+\bottomrule
+\end{tabular}
+\caption{Growth of the MIP's size with problem dimensions. $H$ is the
+  planning horizon defined in Section~2.1, typically of order $\sum_{ij}
+  p_{ij}$.}
+\end{table}
+
+The eligibility constraints~\eqref{eq:c1b} add negligible overhead --
+they are simple variable bounds, not disjunctive or time-indexed, so
+their count grows only linearly in $m \times n$ and they have no
+material effect on solver difficulty. Even for a modest instance with
+$m=5$ machines and $n=10$ jobs, the number
+of binary sequencing variables already reaches $450$, and the disjunctive
+constraints yield a notoriously weak LP relaxation -- a well-documented
+issue for job-shop-style MIPs \citep{pinedo2016scheduling}. The buffer
+variables $z_{jst}$ are the most problematic component: their count
+grows with the planning horizon $H$, which itself grows with total
+processing time, so doubling typical processing times roughly doubles
+the number of buffer variables -- exploding the model size for any
+non-trivial instance.
+
+\subsection{Critical Assessment of the MIP}
+
+\paragraph{Strengths.}
+\begin{itemize}
+  \item Provides an exact representation; guarantees global optimality
+    given sufficient solver time.
+  \item The bottleneck lower bound \eqref{eq:c6} tightens the relaxation
+    and accelerates branch-and-bound.
+  \item Flexible: alternative objectives (WIP, weighted tardiness) can be
+    substituted directly into \eqref{eq:obj}.
+  \item Useful as an exact benchmark for evaluating heuristic solution
+    quality on small instances.
+  \item Machine eligibility \eqref{eq:c1b} -- the requirement that some
+    jobs be restricted to specific machines within a stage -- is captured
+    at negligible cost, since it is a simple variable bound rather than a
+    disjunctive or time-indexed constraint.
+\end{itemize}
+
+\paragraph{Weaknesses.}
+\begin{itemize}
+  \item The disjunctive constraints \eqref{eq:c2a}--\eqref{eq:c2b} are the
+    classical weakness of job-shop MIPs, producing enormous branch-and-bound
+    trees even for small instances.
+  \item The buffer constraints \eqref{eq:c4a}--\eqref{eq:c4b}, although now
+    linear, require a time-indexed binary variable for every
+    (job, stage-boundary, time-period) triple -- a representation that is
+    exact but whose size scales directly with the planning horizon $H$.
+  \item The cyclic nature of the schedule -- where the end of one MPS
+    cycle feeds directly into the start of the next -- is not captured by
+    the static formulation above without additional wrap-around
+    constraints.
+  \item The bypass feature, while trivial to encode via $p_{ij}=0$,
+    interacts subtly with the buffer constraints, since bypassing jobs
+    still occupy the material handling system.
+  \item The model does not scale: industrial PCB assembly lines may involve
+    dozens of stages and hundreds of job types per MPS, far beyond the
+    practical reach of exact MIP solvers.
+\end{itemize}
+
+\noindent \textbf{Overall verdict.} The MIP is theoretically sound and a
+useful small-instance benchmark, but it is not a practical solution method
+for industrial-scale instances of this problem -- precisely the motivation
+behind IBM's development of the FFLL heuristic \citep{ibm_ffll}.
+
+% =====================================================================
+\section{The FFLL Algorithm}
+% =====================================================================
+
+\subsection{Algorithm Description}
+
+The Flexible Flow Line Loading (FFLL) algorithm \citep{ibm_ffll,
+pinedo2016scheduling} solves the problem in three sequential phases, each
+addressing one of the three core decisions: \emph{who} processes \emph{what},
+\emph{in what order}, and \emph{when}.
+
+\subsubsection*{Phase 1 --- Machine Allocation (LPT Heuristic)}
+
+Each job is assigned to one machine per stage so that workloads across
+parallel machines at that stage are as balanced as possible -- balance
+directly determines the bottleneck workload and hence the achievable cycle
+time. As noted in Section~1.1, not all machines within a stage are
+necessarily identical, and a job may be restricted to a subset
+$M_s(j) \subseteq M_s$ of eligible machines at that stage (the same
+eligibility notion introduced for the MIP in Section~2.1). We therefore
+apply an \emph{eligibility-restricted} Longest Processing Time (LPT)
+heuristic \citep{pinedo2016scheduling} independently at every stage with
+multiple machines:
+
+\begin{enumerate}
+  \item Sort all jobs in decreasing order of processing time at that stage.
+  \item Assign each job, one at a time, to the currently least-loaded
+    \emph{eligible} machine at that stage, i.e.\ $\arg\min_{i \in M_s(j)}
+    (\text{current load of } i)$, rather than the least-loaded machine
+    overall.
+  \item Repeat until all jobs are assigned.
+\end{enumerate}
+
+When every job is eligible for every machine at a stage ($M_s(j)=M_s\
+\forall j$), this reduces exactly to standard LPT. When eligibility is
+restrictive -- e.g.\ only one machine at a stage can run a particular job
+-- the heuristic degenerates to simply assigning that job to its sole
+eligible machine, regardless of load; balance is then only achievable
+among whatever jobs retain a genuine choice. This is an unavoidable
+consequence of eligibility restrictions, not a defect of the heuristic:
+the same loss of balancing freedom occurs in the exact MIP of Section~2,
+where eligibility \eqref{eq:c1b} restricts the feasible region in
+exactly the same way before any optimization takes place.
+
+\subsubsection*{Phase 2 --- Sequencing (Dynamic Balancing Heuristic)}
+
+Let $n$ be the number of jobs and $m$ the number of machines. Define
+
+\begin{align*}
+  W_i &= \sum_{j=1}^n p_{ij} && \text{workload of machine } i, \\
+  W &= \sum_{i=1}^m W_i && \text{total system workload}, \\
+  p_k &= \sum_{i=1}^m p_{ik} && \text{system-wide workload of job } k, \\
+  o_{ij} &= p_{ij} - p_j \frac{W_i}{W} && \text{overload contribution of job } j \text{ to machine } i, \\
+  O_{ij} &= \sum_{k \in S_j} o_{ik} && \text{cumulative overload on machine } i \text{ after position } j,
+\end{align*}
+
+where $S_j$ is the set of jobs loaded up to and including position $j$ in
+the sequence. The Dynamic Balancing heuristic greedily minimizes
+
+\begin{equation}
+  \sum_{i=1}^{m} \sum_{j=1}^{n} \max(O_{ij}, 0)
+  \label{eq:overload}
+\end{equation}
+
+by, at each position, selecting from the remaining unscheduled jobs the
+one that minimizes the resulting total positive cumulative overload.
+
+\subsubsection*{Phase 3 --- Timing of Releases (Bottleneck Anchoring)}
+
+\begin{enumerate}
+  \item Identify the bottleneck machine $i^\ast = \arg\max_i W_i$; the
+    cycle time lower bound is $T^\ast = W_{i^\ast}$.
+  \item Release all jobs into the system as rapidly as possible and
+    simulate the resulting schedule.
+  \item Fix the start/completion times on the bottleneck machine -- no
+    idle time is permitted there.
+  \item For machines \emph{upstream} of the bottleneck, delay processing
+    as much as possible without altering job sequences, reducing WIP.
+  \item For machines \emph{downstream} of the bottleneck, process jobs as
+    early as possible, again without altering sequences.
+\end{enumerate}
+
+\subsection{Three Original Application Examples}
+
+The following three examples are constructed independently of the
+textbook and differ from Pinedo's Example~16.3.1. The first two cover
+the base FFLL mechanics; the third specifically demonstrates machine
+eligibility restrictions (Section~1.1).
+
+\subsubsection*{Example A --- Two Stages, Four Jobs, No Bypass}
+
+Stage~1 has two parallel machines; Stage~2 has a single machine; the MPS
+contains four jobs.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & Job 1 & Job 2 & Job 3 & Job 4 \\
+\midrule
+Stage 1 & 5 & 8 & 3 & 6 \\
+Stage 2 & 4 & 2 & 7 & 5 \\
+\bottomrule
+\end{tabular}
+\caption{Stage processing times $p'_{kj}$ for Example A.}
+\end{table}
+
+\textbf{Phase 1 (LPT at Stage 1).} Sorting descending: Job~2~(8), Job~4~(6),
+Job~1~(5), Job~3~(3). Assignment: Job~2$\to$M1 (load 8), Job~4$\to$M2 (load
+6), Job~1$\to$M2 (load 11), Job~3$\to$M1 (load 11). Both Stage~1 machines
+balance perfectly at load 11; Machine~3 (Stage~2) processes all jobs,
+$W_3 = 18$. \textbf{Bottleneck: Machine 3, $T^\ast = 18$.}
+
+\textbf{Phase 2 (Dynamic Balancing).} With $W=(11,11,18)$, $\sum W = 40$,
+and $p_k=(9,10,10,11)$, evaluating $o_{ij}$ and applying the greedy rule
+position-by-position yields the sequence $\mathbf{1 \to 3 \to 2 \to 4}$.
+
+\textbf{Phase 3 (Timing).} The bottleneck machine processes jobs
+back-to-back in this order; the achieved cycle time is $T = 18$, matching
+the lower bound exactly (optimal for this instance).
+
+\subsubsection*{Example B --- Three Stages, Five Jobs, with Bypass}
+
+Stage~1 has one machine; Stage~2 has two parallel machines; Stage~3 has one
+machine; the MPS contains five jobs, with Jobs~2 and~5 bypassing Stage~2.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+ & Job 1 & Job 2 & Job 3 & Job 4 & Job 5 \\
+\midrule
+Stage 1 & 3 & 5 & 2 & 4 & 6 \\
+Stage 2 & 4 & 0 & 6 & 3 & 0 \\
+Stage 3 & 2 & 3 & 1 & 4 & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Stage processing times $p'_{kj}$ for Example B (Jobs 2, 5 bypass Stage 2).}
+\end{table}
+
+\textbf{Phase 1 (LPT at Stage 2).} Only Jobs~1, 3, 4 require Stage~2.
+Sorting descending: Job~3~(6), Job~1~(4), Job~4~(3). Assignment:
+Job~3$\to$M2 (load 6), Job~1$\to$M3 (load 4), Job~4$\to$M3 (load 7). The
+resulting workloads are $W=(20,6,7,12)$, $\sum W = 45$.
+\textbf{Bottleneck: Machine 1 (Stage 1), $T^\ast = 20$.}
+
+\textbf{Phase 2 (Dynamic Balancing).} With $p_k = (9,8,9,11,8)$, evaluating
+$o_{ij}$ and applying the greedy rule position-by-position yields the
+sequence $\mathbf{2 \to 1 \to 3 \to 5 \to 4}$.
+
+\textbf{Phase 3 (Timing).} The bottleneck Machine~1 processes jobs
+back-to-back in this order; Jobs~2 and~5 bypass Stage~2 directly. The
+achieved cycle time is $T = 20$, again matching the lower bound exactly.
+
+\subsubsection*{Example C --- Two Stages, Six Jobs, with General
+  Machine Eligibility Restrictions}
+
+Eligibility restrictions in practice are not limited to a simple
+"one restricted machine vs.\ one universal machine" pattern: at a stage
+with several machines, \emph{each} job can have its own eligible
+subset, of any size, independent of the other jobs' subsets. This
+example demonstrates that general case directly: Stage~1 has \emph{four}
+parallel machines, and the six jobs have eligible-machine counts ranging
+from $1$ of $4$ up to $4$ of $4$. Stage~2 has a single machine, so
+eligibility there is moot.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+ & Job 1 & Job 2 & Job 3 & Job 4 & Job 5 & Job 6 \\
+\midrule
+Stage 1 & 6 & 5 & 7 & 4 & 8 & 3 \\
+Stage 2 & 2 & 3 & 2 & 4 & 3 & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Stage processing times $p'_{kj}$ for Example C.}
+\end{table}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+Job & Eligible machines at Stage 1 \\
+\midrule
+1 & $\{1,2,3\}$ \quad (3 of 4) \\
+2 & $\{2,4\}$ \quad (2 of 4) \\
+3 & $\{1,3,4\}$ \quad (3 of 4) \\
+4 & $\{3\}$ \quad (1 of 4) \\
+5 & $\{1,2,3,4\}$ \quad (4 of 4, unrestricted) \\
+6 & $\{1,4\}$ \quad (2 of 4) \\
+\bottomrule
+\end{tabular}
+\caption{Eligibility sets $M_1(j)$ for Example C, illustrating that
+  restrictions can affect any subset of machines, of any size, not
+  merely a single ``restricted machine vs.\ universal machine'' pattern.}
+\label{tab:examplec-eligibility}
+\end{table}
+
+\textbf{Phase 1 (eligibility-restricted LPT at Stage 1).} Sorting
+descending by Stage-1 time: Job~5~(8), Job~3~(7), Job~1~(6), Job~2~(5),
+Job~4~(4), Job~6~(3). We track the load on each of the four machines as
+the algorithm proceeds, restricting the ``least-loaded'' choice at each
+step to that job's eligible set:
+
+\begin{enumerate}
+  \item \textbf{Job~5} (eligible: $\{1,2,3,4\}$, all tied at load~0)
+    $\to$ Machine~1 (load $0\to8$).
+  \item \textbf{Job~3} (eligible: $\{1,3,4\}$; loads are $8,-,0,0$
+    among eligible machines) $\to$ Machine~3 (load $0\to7$).
+  \item \textbf{Job~1} (eligible: $\{1,2,3\}$; loads are $8,0,7$) $\to$
+    Machine~2, the least loaded eligible machine (load $0\to6$).
+  \item \textbf{Job~2} (eligible: $\{2,4\}$; loads are $6,0$) $\to$
+    Machine~4 (load $0\to5$).
+  \item \textbf{Job~4} (eligible: $\{3\}$ \emph{only}) $\to$ Machine~3
+    by necessity (load $7\to11$), even though Machine~3 is already the
+    most heavily loaded eligible machine for Job~1 a moment earlier and
+    is, after this step, the most heavily loaded machine at the stage
+    overall. This is the general case of a job with only one eligible
+    machine out of several: it must be placed there regardless of
+    current load.
+  \item \textbf{Job~6} (eligible: $\{1,4\}$; loads are $8,5$) $\to$
+    Machine~4 (load $5\to8$).
+\end{enumerate}
+
+The resulting Stage-1 workloads are $W_{1:4} = (8,6,11,8)$. Job~4's
+forced placement on Machine~3 -- the single machine it is eligible for
+-- is what pushes Machine~3 to $11$, well above the other three
+machines; no amount of cleverness in ordering the other jobs could have
+prevented this, since Job~4 has no alternative. Including Stage~2 (a
+single machine processing all six jobs, total load $16$), the full
+machine workload vector is $W=(8,6,11,8,16)$, $\sum W = 49$.
+\textbf{Bottleneck: Machine~5 (Stage~2), $T^\ast = 16$.}
+
+\textbf{Contrast with the unrestricted case.} If eligibility were
+ignored entirely (every job eligible for every Stage-1 machine), LPT
+would instead produce $W_{1:4} = (8,7,9,9)$ -- a range of just $2$
+(from $7$ to $9$) versus the range of $5$ (from $6$ to $11$) obtained
+under the eligibility restriction above. The overall bottleneck is
+unaffected here (Machine~5 at Stage~2 dominates either way, since its
+load of $16$ exceeds any Stage-1 machine's load in both cases), but
+Stage~1's \emph{internal} balance is visibly worse under the
+restriction -- exactly the effect described in Section~3.1, now shown
+with eligible-set sizes other than the trivial $1$-of-$2$ case.
+
+\textbf{Phase 2 (Dynamic Balancing).} Evaluating $o_{ij}$ and applying
+the greedy rule position-by-position yields the sequence
+$\mathbf{6 \to 4 \to 1 \to 5 \to 3 \to 2}$.
+
+\textbf{Phase 3 (Timing).} The bottleneck Machine~5 processes jobs
+back-to-back in this order; the achieved makespan is $19.00$, giving a
+gap of $18.8\%$ to the lower bound $T^\ast=16$.
+
+\subsection{The Profile Fitting (PF) Heuristic and Comparison with FFLL}
+
+As requested, we apply a second sequencing heuristic to the same problem
+and compare it against FFLL: \textbf{Profile Fitting (PF)}, originally
+proposed by \citet{mccormick1989sequencing} for cyclic sequencing in
+zero-buffer (blocking) assembly lines, and presented by Pinedo
+immediately before Section~16.3 as a heuristic for the simpler
+zero-buffer case. Pinedo's own worked example there runs \emph{both} an
+unweighted and a bottleneck-weighted variant of PF on the same instance
+and shows the weighted variant achieving a strictly shorter cycle time
+(12 versus 14). We therefore implement and compare \emph{both} variants
+here, adapted to the finite-buffer environment of Section~16.3, so that
+all three sequencing rules -- Dynamic Balancing, plain PF, and weighted
+PF -- can be compared on identical instances.
+
+\subsubsection*{Algorithm Description}
+
+PF builds the job sequence one position at a time, exactly like Dynamic
+Balancing, but with a different greedy criterion: instead of minimizing
+cumulative \emph{overload} \eqref{eq:overload}, it minimizes cumulative
+\emph{nonproductive time} -- the sum of machine idle time and machine
+blocked time.
+
+\begin{enumerate}
+  \item \textbf{Select the first job.} Choose the job with the largest
+    total processing time across all machines (the variant Pinedo
+    describes as "largest amount of processing").
+  \item \textbf{Generate the profile.} Simulate the partial sequence
+    built so far, recording, for every machine, the idle time (machine
+    waiting for a job to arrive) and blocked time (a finished job cannot
+    advance because the immediately downstream buffer is full).
+  \item \textbf{Evaluate candidates.} For every unscheduled job, tentatively
+    append it to the sequence and recompute the resulting weighted sum of
+    idle and blocked time across all machines.
+  \item \textbf{Select} the candidate job minimizing this sum.
+  \item \textbf{Repeat} steps 2--4 until all jobs are sequenced.
+\end{enumerate}
+
+\noindent Step~3 requires a per-machine weight vector, and Pinedo's
+chapter presents \emph{two} concrete choices for it, both of which we
+implement:
+
+\begin{itemize}
+  \item \textbf{Unweighted PF.} Every machine's nonproductive time counts
+    equally (weight $1$ on every machine). This is the baseline variant.
+  \item \textbf{Weighted PF ($\mathrm{PF}_w$).} Nonproductive time on the
+    bottleneck machine is weighted more heavily than on the rest --
+    Pinedo's own example weights the two constraining machines at $1$ and
+    the non-bottleneck machine at $0$, in the spirit of the Optimized
+    Production Technology (OPT) philosophy that bottleneck delay is more
+    costly than non-bottleneck delay. We adopt this same weighting:
+    weight $1$ on the bottleneck machine identified after Phase~1, and
+    weight $0$ elsewhere.
+\end{itemize}
+
+\textbf{Adaptation to finite buffers.} In Pinedo's original (zero-buffer)
+setting, a job is blocked the instant it finishes and the next machine is
+occupied, since there is nowhere to put it. In our finite-buffer setting,
+a job is blocked only once the buffer immediately downstream has reached
+its capacity $b_s$ -- the direct finite-buffer analogue of the original
+blocking condition. With $b_s \to 0$ for all $s$, this adapted PF
+coincides with the original zero-buffer PF.
+
+\subsubsection*{Comparison with FFLL on Examples A and B}
+
+Applying both PF variants (with buffer capacity $b_s=2$) to the two
+examples of Section~3.2 gives:
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ & Sequence & Makespan & Gap to LB \\
+\midrule
+\multicolumn{4}{@{}l}{\textit{Example A (LB $=18$)}} \\
+FFLL (Dynamic Balancing) & $1\to3\to2\to4$ & $23.00$ & $27.8\%$ \\
+PF (unweighted) & $4\to1\to2\to3$ & $24.00$ & $33.3\%$ \\
+$\mathrm{PF}_w$ (weighted) & $4\to1\to2\to3$ & $24.00$ & $33.3\%$ \\
+\midrule
+\multicolumn{4}{@{}l}{\textit{Example B (LB $=20$)}} \\
+FFLL (Dynamic Balancing) & $2\to1\to3\to5\to4$ & $27.00$ & $35.0\%$ \\
+PF (unweighted) & $4\to1\to2\to5\to3$ & $27.00$ & $35.0\%$ \\
+$\mathrm{PF}_w$ (weighted) & $4\to1\to2\to3\to5$ & $23.00$ & $15.0\%$ \\
+\bottomrule
+\end{tabular}
+\caption{FFLL vs.\ both PF variants on Examples A and B, evaluated under
+  identical Phase~1 allocation and Phase~3 timing (only the sequencing
+  phase differs). Makespan is the simulated makespan of one MPS pass
+  under a finite buffer of capacity~2 per stage.}
+\label{tab:pf-examples}
+\end{table}
+
+On Example~A, the two PF variants happen to coincide: Stage~1's two
+machines are already perfectly balanced by LPT ($W_1=W_2=11$), so
+weighting the bottleneck machine alone versus weighting all three
+machines equally does not change which candidate job minimizes
+nonproductive time at any position. Example~B breaks this tie and
+reproduces, in miniature, exactly the effect Pinedo's own example
+demonstrates: weighting the bottleneck machine changes the selected
+sequence and yields a markedly better result ($23.00$ vs.\ $27.00$, a
+$14.8\%$ reduction) than the unweighted variant. Neither PF variant nor
+FFLL dominates throughout: FFLL sequences Example~A best, while
+$\mathrm{PF}_w$ sequences Example~B best. This motivates testing all
+three on a larger, more systematic sample.
+
+\subsubsection*{Comparison with FFLL on Ten Random Instances}
+
+We re-use the same ten randomly generated instances and generation
+procedure as in Section~4.3, applying both PF variants with the same
+Phase~1 allocation and Phase~3 timing as FFLL, so that the comparison
+isolates the effect of the sequencing phase alone.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}rrrrrrrrrr@{}}
+\toprule
+\# & Jobs & Stg & LB & FFLL & FFLL gap & PF & PF gap & $\mathrm{PF}_w$ & $\mathrm{PF}_w$ gap \\
+\midrule
+1  & 4  & 2 & 9.0  & 13.00 & 44.4\%  & 13.00 & 44.4\%  & 12.00 & 33.3\%  \\
+2  & 5  & 2 & 23.0 & 26.00 & 13.0\%  & 32.00 & 39.1\%  & 32.00 & 39.1\%  \\
+3  & 6  & 3 & 32.0 & 35.00 & 9.4\%   & 40.00 & 25.0\%  & 40.00 & 25.0\%  \\
+4  & 7  & 3 & 38.0 & 42.00 & 10.5\%  & 51.00 & 34.2\%  & 51.00 & 34.2\%  \\
+5  & 8  & 4 & 21.0 & 43.00 & 104.8\% & 47.00 & 123.8\% & 48.00 & 128.6\% \\
+6  & 8  & 3 & 34.0 & 49.00 & 44.1\%  & 55.00 & 61.8\%  & 47.00 & 38.2\%  \\
+7  & 10 & 4 & 46.0 & 56.00 & 21.7\%  & 73.00 & 58.7\%  & 61.00 & 32.6\%  \\
+8  & 10 & 5 & 49.0 & 56.00 & 14.3\%  & 65.00 & 32.7\%  & 63.00 & 28.6\%  \\
+9  & 12 & 4 & 66.0 & 97.00 & 47.0\%  & 89.00 & 34.8\%  & 85.00 & 28.8\%  \\
+10 & 12 & 5 & 63.0 & 81.00 & 28.6\%  & 92.00 & 46.0\%  & 90.00 & 42.9\%  \\
+\midrule
+\multicolumn{5}{r}{\textbf{Average}} & \textbf{33.8\%} & & \textbf{50.1\%} & & \textbf{43.1\%} \\
+\bottomrule
+\end{tabular}
+\caption{FFLL vs.\ both PF variants on the ten random instances of
+  Section~4.3. Gaps are relative to the bottleneck lower bound (LB).}
+\label{tab:pf-random}
+\end{table}
+
+Three findings emerge. \textbf{First}, and most directly relevant to
+Pinedo's own claim, $\mathrm{PF}_w$ improves on plain PF in 6 of the 10
+instances (and ties on the remaining 4, where the same balanced-machine
+coincidence as Example~A occurs) -- the bottleneck-weighting refinement
+is, on average, beneficial, exactly as the textbook's worked example
+illustrates. The average gap falls from $50.1\%$ (unweighted PF) to
+$43.1\%$ (weighted $\mathrm{PF}_w$). \textbf{Second}, FFLL's Dynamic
+Balancing outperforms both PF variants on average in our finite-buffer
+adaptation, with the lowest mean gap ($33.8\%$) and the best result on 7
+of the 10 instances (versus 3 for $\mathrm{PF}_w$ and 0 for plain PF
+outright, since $\mathrm{PF}_w$ is never strictly worse than PF in our
+runs). \textbf{Third}, the gap between FFLL and PF widens on the larger
+instances (7--10), suggesting Dynamic Balancing's forward-looking
+overload measure \eqref{eq:overload} scales better than PF's
+nonproductive-time measure as problem size grows. A plausible explanation
+is that Dynamic Balancing accounts for workload imbalance \emph{before}
+it materializes as idle or blocked time, whereas PF only reacts to
+nonproductive time \emph{after} a tentative placement -- a less
+forward-looking signal that may compound over longer sequences. This is
+a meaningful empirical finding given that PF was originally designed for
+the zero-buffer case, not the finite-buffer case studied here.
+
+\subsection{Critical Assessment of the FFLL Heuristic}
+
+\paragraph{Strengths.}
+\begin{itemize}
+  \item Computationally efficient: Phase~1 runs in $O(n \log n)$ per
+    stage, Phase~2 in $O(n^2 m)$, and Phase~3 in linear time -- tractable
+    for the hundreds of job types found in industrial MPS instances.
+  \item The three-phase decomposition mirrors the natural decision
+    hierarchy: allocation must precede sequencing (workloads must be
+    known first), and sequencing must precede timing.
+  \item The Dynamic Balancing objective \eqref{eq:overload} has a clear
+    theoretical motivation: minimizing burst loading directly reduces
+    buffer occupancy and blocking probability.
+  \item Bypass is handled naturally, since bypassed stages simply
+    contribute zero to all $o_{ij}$ terms.
+  \item Machine eligibility restrictions are handled by a straightforward
+    modification of LPT (Section~3.1) that restricts each job's candidate
+    machine to its eligible subset $M_s(j)$, at no extra computational
+    cost.
+  \item Extensive practical experiments reported by Pinedo confirm FFLL's
+    value as a scheduling tool in real assembly environments
+    \citep{pinedo2016scheduling}.
+\end{itemize}
+
+\paragraph{Limitations.}
+\begin{itemize}
+  \item The three phases are solved \emph{independently and sequentially}
+    with no feedback loop -- a poor Phase~1 allocation cannot be corrected
+    by Phases~2 or~3.
+  \item LPT does not guarantee optimal balance; Pinedo himself notes this
+    explicitly for Stage~3 of Example~16.3.1.
+  \item Severe eligibility restrictions can defeat balancing entirely: if
+    only one machine at a stage is eligible for a given job, that job
+    must go there regardless of current load, and the achievable balance
+    is limited to whatever flexibility remains among jobs with a genuine
+    choice of machine.
+  \item The Dynamic Balancing heuristic is \emph{greedy with no lookahead}:
+    a locally optimal choice at position $j$ may preclude a substantially
+    better global sequence.
+  \item WIP minimization is addressed only indirectly, through Phase~3's
+    timing adjustments, with no explicit guarantee against blocking under
+    tight buffers.
+  \item The algorithm assumes a fixed, fully known MPS and offers no
+    mechanism for incremental re-optimization under dynamic arrivals or
+    uncertain processing times.
+  \item Although Dynamic Balancing outperformed both adapted PF variants
+    on average (Section~3.3), $\mathrm{PF}_w$ still won on 3 of 10 random
+    instances and on Example~B, showing that no single greedy sequencing
+    rule dominates across all instances -- a further argument for the
+    iterated, non-greedy approach developed in Section~4.
+\end{itemize}
+
+% =====================================================================
+\section{Improved Algorithm: Iterated Greedy with Local Search (IG-LS)}
+% =====================================================================
+
+\subsection{Design Rationale}
+
+The principal weakness identified in Section~3.4 is that FFLL's Phase~2
+is a \emph{non-backtracking greedy} procedure: once a job is placed,
+it remains fixed regardless of how later choices unfold. This is precisely
+the failure mode that the \emph{iterated greedy} (IG) metaheuristic
+framework of \citet{ruiz2007simple} was designed to address for
+permutation flow shop scheduling, using a simple destruction--reconstruction
+cycle that the original paper itself shows is competitive with, and often
+superior to, considerably more elaborate metaheuristics while remaining
+straightforward to implement \citep{ruiz2007simple}. This motivates
+adapting the same destruction--reconstruction principle to the FFLL
+sequencing phase.
+
+We propose \textbf{IG-LS}, which retains FFLL's Phase~1 (LPT allocation)
+and Phase~3 (bottleneck timing) unchanged, and replaces Phase~2 with three
+layers:
+
+\begin{enumerate}
+  \item \textbf{Warm start.} Initialize with the FFLL Dynamic Balancing
+    sequence.
+  \item \textbf{Local search (2-opt).} Exhaustively evaluate pairwise job
+    swaps; accept any swap that reduces the \emph{actual simulated
+    makespan}; repeat until no improving swap remains.
+  \item \textbf{Iterated perturbation.} Remove a random contiguous block of
+    jobs and reinsert it at a random position (destruction--reconstruction,
+    following \citet{ruiz2007simple}); re-apply local search; accept the
+    new solution only if it improves the incumbent makespan. Repeat for a
+    fixed iteration budget.
+\end{enumerate}
+
+Crucially, IG-LS optimizes the \emph{true simulated makespan} rather than
+the overload proxy \eqref{eq:overload} used by Dynamic Balancing -- a
+more direct and unbiased optimization signal.
+
+\subsection{Pseudocode}
+
+\begin{algorithm}[h!]
+\caption{IG-LS: Iterated Greedy with Local Search}
+\begin{algorithmic}[1]
+\Procedure{IG-LS}{instance, n\_iter $=150$, block\_size $=2$}
+  \State alloc $\gets$ LPT\_Allocate(instance) \Comment{Phase 1, identical to FFLL}
+  \State seq $\gets$ DynamicBalancing(alloc) \Comment{warm start}
+  \State (seq, best\_ms) $\gets$ LocalSearch2opt(seq, alloc)
+  \For{$k = 1$ \textbf{to} n\_iter}
+    \State seq$'$ $\gets$ Perturb(seq, block\_size) \Comment{remove \& reinsert block}
+    \State (seq$'$, ms$'$) $\gets$ LocalSearch2opt(seq$'$, alloc)
+    \If{ms$'$ $<$ best\_ms}
+      \State seq $\gets$ seq$'$; \quad best\_ms $\gets$ ms$'$
+    \EndIf
+  \EndFor
+  \State cycle\_time $\gets$ BottleneckTiming(seq, alloc) \Comment{Phase 3, identical to FFLL}
+  \State \textbf{return} seq, cycle\_time, best\_ms
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Experimental Results on Ten Random Instances}
+
+Ten instances were generated with deliberately varied characteristics --
+ranging from small 4-job/2-stage problems to larger 12-job/5-stage
+problems, with varying bypass probabilities and numbers of machines per
+stage (full generator and parameters in the accompanying source code,
+\texttt{ffll\_igls.py}). The lower bound (LB) reported is the bottleneck
+machine workload after LPT allocation (constraint~\eqref{eq:c6}).
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+\# & Jobs & Stg & LB & FFLL & FFLL gap & IG-LS & IG-LS gap & Improv. \\
+\midrule
+1  & 4  & 2 & 9.0  & 13.00 & 44.4\%  & 12.00 & 33.3\% & 7.7\%  \\
+2  & 5  & 2 & 23.0 & 26.00 & 13.0\%  & 25.00 & 8.7\%  & 3.8\%  \\
+3  & 6  & 3 & 32.0 & 35.00 & 9.4\%   & \textbf{32.00} & \textbf{0.0\%} & 8.6\%  \\
+4  & 7  & 3 & 38.0 & 42.00 & 10.5\%  & \textbf{38.00} & \textbf{0.0\%} & 9.5\%  \\
+5  & 8  & 4 & 21.0 & 43.00 & 104.8\% & 34.00 & 61.9\% & 20.9\% \\
+6  & 8  & 3 & 34.0 & 49.00 & 44.1\%  & 35.00 & 2.9\%  & 28.6\% \\
+7  & 10 & 4 & 46.0 & 56.00 & 21.7\%  & 50.00 & 8.7\%  & 10.7\% \\
+8  & 10 & 5 & 49.0 & 56.00 & 14.3\%  & 54.00 & 10.2\% & 3.6\%  \\
+9  & 12 & 4 & 66.0 & 97.00 & 47.0\%  & 72.00 & 9.1\%  & 25.8\% \\
+10 & 12 & 5 & 63.0 & 81.00 & 28.6\%  & 73.00 & 15.9\% & 9.9\%  \\
+\midrule
+\multicolumn{5}{r}{\textbf{Average}} & \textbf{33.8\%} & & \textbf{15.1\%} & \textbf{12.9\%} \\
+\bottomrule
+\end{tabular}
+\caption{FFLL vs.\ IG-LS on ten randomly generated instances. Gaps are
+  relative to the bottleneck lower bound (LB). Bold entries indicate
+  proven-optimal solutions (gap $=0\%$).}
+\label{tab:results}
+\end{table}
+
+IG-LS improved \emph{every one} of the ten instances. On Instances~3
+and~4 it reached the theoretical lower bound, proving optimality. The
+largest gains occur on Instances~5, 6, and~9, where FFLL's greedy
+sequencing committed to particularly poor early choices that IG-LS's
+perturbation and local search were able to correct. Across all ten
+instances, the average gap to the lower bound fell from $33.8\%$ (FFLL) to
+$15.1\%$ (IG-LS), while all runs completed in well under one second.
+
+\subsection{Critical Assessment of IG-LS}
+
+\paragraph{Strengths over FFLL.}
+\begin{itemize}
+  \item More than halves the average optimality gap (33.8\% $\to$ 15.1\%).
+  \item Reaches proven optimality on two of ten instances.
+  \item Improves consistently across all tested instance types, not just
+    isolated cases.
+  \item Optimizes actual makespan directly, rather than an overload proxy.
+  \item Remains computationally cheap (sub-second per instance at this
+    scale), consistent with reports in the IG literature that the
+    framework is simple yet highly competitive against more elaborate
+    metaheuristics \citep{ruiz2007simple}.
+\end{itemize}
+
+\paragraph{Remaining limitations.}
+\begin{itemize}
+  \item The gap to the lower bound remains substantial on some instances
+    (e.g., Instance~5: 61.9\%); note the bound itself may be loose, so the
+    true optimality gap could be smaller than reported.
+  \item The purely greedy acceptance criterion (accept only strict
+    improvements) may miss solutions reachable only via temporary uphill
+    moves; a simulated-annealing-style acceptance criterion, as used in
+    several IG variants \citep{ruiz2007simple}, could help.
+  \item The perturbation block size is fixed at~2; an adaptive schedule
+    could better balance exploration and exploitation.
+  \item Like FFLL, the three phases remain solved independently; a fully
+    integrated metaheuristic spanning allocation and sequencing could
+    yield further gains at higher computational cost.
+  \item Scalability beyond the tested range (up to 12 jobs) is untested;
+    the $O(n^2)$ per-iteration cost of 2-opt local search will eventually
+    dominate for much larger MPS instances.
+\end{itemize}
+
+\bigskip
+\noindent\textit{The complete Python implementation (FFLL, IG-LS, instance
+generator, and experiment runner) accompanies this report as
+\texttt{ffll\_igls.py}.}
+
+\newpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
