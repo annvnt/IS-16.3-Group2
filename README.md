@@ -21,7 +21,9 @@ makespan (cycle time).
 
 ```
 ffll_vs_mip.py       FFLL heuristic + Gurobi MIP + instance generator + comparison runner
-docs/                the report PDF, LaTeX source, and bibliography
+docs/                the report PDF
+gantt_charts/         generated Gantt charts (one PNG per instance, FFLL vs. MIP) —
+                      produced by `python ffll_vs_mip.py`
 ```
 
 ## Setup
@@ -43,8 +45,10 @@ python ffll_vs_mip.py
 Solves the same ten small instances used in the report (3–5 jobs, 2–3 stages, 1–2
 machines per stage; S9/S10 include bypass) with both FFLL and the Gurobi MIP, prints a
 comparison table (FFLL makespan, MIP-optimal `T*`, gap, solve time, buffer-feasibility
-check), and saves a side-by-side Gantt chart per instance to `gantt_charts/` (FFLL on
-top, MIP-optimal on the bottom, consistent job colours in both). Matches Table 6 of the
+check), and (re)generates `gantt_charts/gantt_S1.png` … `gantt_S10.png` — one side-by-side
+Gantt chart per instance (FFLL on top, MIP-optimal on the bottom, consistent job colours
+in both). The charts already in the repo were produced this way; re-run the script to
+refresh them after any change to the instances or algorithms. Matches Table 6 of the
 report: FFLL matches the optimum on 5/10 instances, with an average gap of 6.8%.
 
 To reproduce the minimal counter-example (Example B) with its own Gantt chart:
