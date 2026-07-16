@@ -1,4 +1,5 @@
-# IS 16.3 — Scheduling a Flexible Flow Line with Limited Buffers and Bypass
+# Intelligent Scheduling: Algorithms, Complexity and AI in Operations 
+# Chapter 16.3 — Scheduling a Flexible Flow Line with Limited Buffers and Bypass
 
 Group 2 project for **Intelligent Scheduling** (TU Munich, SS2026). Operations Research
 project based on **Chapter 16.3** of Pinedo, *Scheduling: Theory, Algorithms, and Systems*.
